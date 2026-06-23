@@ -1520,6 +1520,63 @@ uint8_t Adafruit_PN532::ntag2xx_WriteNDEFURI(uint8_t uriIdentifier, char *url,
   return 1;
 }
 
+/**************************************************************************/
+/*!
+ Tries to authenticate to a password protected NTAG2xx.
+
+ @param  password     The 4 byte password to try.
+ @param  acknowledge  The 2 bytes of PACK are written here if the
+                      authentification succeeded. This can be nullptr.
+
+ @returns 1 if everything executed properly, 0 for an error
+ */
+/**************************************************************************/
+uint8_t Adafruit_PN532::ntag2xx_Authenticate(const byte *password,
+                                             byte *acknowledge) {
+#if MIFAREDEBUG
+  PN532DEBUGPRINT.println(F("Trying to authenticate"));
+#endif
+
+  /* Prepare the command */
+  pn532_packetbuffer[0] = PN532_COMMAND_INCOMMUNICATETHRU;
+  pn532_packetbuffer[1] = 0x1B;                // PWD_AUTH command code
+  memcpy(pn532_packetbuffer + 2, password, 4); // 4 bytes or 32 bit password.
+
+#if MIFAREDEBUG
+  PN532DEBUGPRINT.print(F("Authenticate command: "));
+  Adafruit_PN532::PrintHexChar(pn532_packetbuffer, 6);
+#endif
+
+  /* Send the command */
+  if (!sendCommandCheckAck(pn532_packetbuffer, 2 + 4)) {
+#if MIFAREDEBUG
+    PN532DEBUGPRINT.println(F("Failed to receive ACK for authentification"));
+#endif
+    return 0;
+  }
+
+  /* Read the response packet */
+  readdata(pn532_packetbuffer, 8 + 4);
+#if MIFAREDEBUG
+  PN532DEBUGPRINT.print("Got authenticate response packet: ");
+  Adafruit_PN532::PrintHexChar(pn532_packetbuffer, 8 + 4);
+#endif
+  if (pn532_packetbuffer[7] == 0x00) {
+    // Positive response is 00 00 FF 05 FB D5 43 00 00 00 E8 00
+    if (acknowledge) { // Prevent nullpointer exception
+      acknowledge[0] = pn532_packetbuffer[8];
+      acknowledge[1] = pn532_packetbuffer[9];
+    }
+    return 1;
+  } else { // Byte 8 is 01
+#if MIFAREDEBUG
+    PN532DEBUGPRINT.println(F("Unexpected response for authentification"));
+#endif
+    // Is password is wrong we get 00 00 FF 03 FD D5 43 01 E7 00
+    return 0;
+  }
+}
+
 /************** high level communication functions (handles both I2C and SPI) */
 
 /**************************************************************************/
