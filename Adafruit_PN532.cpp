@@ -1555,17 +1555,53 @@ uint8_t Adafruit_PN532::ntag2xx_Authenticate(const byte *password,
     return 0;
   }
 
-  /* Read the response packet */
+  /*
+   * Read the response packet
+   * The response looks like this:
+   *
+   * <Preamble 3 byte, always 00 00 FF>
+   * <Payload length 1 byte, 5 in this case>
+   * <Checksum 1 byte, adds up with length to 00>
+   * <Response CMD 2 byte, always D5 43 for this command>
+   * <Status Code 1 byte, 0 on success>
+   * <PACK data 2 byte, should be verified with expected PACK>
+   * <State 2 byte, NTAG execution state data, don't care>
+   *
+   * Example:
+   * 00 00 FF 05 FB D5 43 00 00 00 E8 00
+   *
+   */
   readdata(pn532_packetbuffer, 8 + 4);
 #if MIFAREDEBUG
   PN532DEBUGPRINT.print("Got authenticate response packet: ");
   Adafruit_PN532::PrintHexChar(pn532_packetbuffer, 8 + 4);
 #endif
+  if (pn532_packetbuffer[3] ==
+      ~(pn532_packetbuffer[4]) + 1) { // CRC and length add up to zero?
+#ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.println(F("Invalid CRC with ntag2xx_Authenticate"));
+#endif
+    return 0;
+  }
+  if (pn532_packetbuffer[3] !=
+      5) { // Length should be 5: 1 status byte, 2 PACK bytes, 2 state bytes
+#ifdef MIFAREDEBUG
+    PN532DEBUGPRINT.println(
+        F("Unexpected length (!= 5) with ntag2xx_Authenticate"));
+#endif
+    return 0;
+  }
+  // Check status byte, should be 0 on success, different error code otherwise
   if (pn532_packetbuffer[7] == 0x00) {
     // Positive response is 00 00 FF 05 FB D5 43 00 00 00 E8 00
-    if (acknowledge) { // Prevent nullpointer exception
-      acknowledge[0] = pn532_packetbuffer[8];
-      acknowledge[1] = pn532_packetbuffer[9];
+    // Verify correct PACK if we expect one
+    if (acknowledge && (pn532_packetbuffer[8] != acknowledge[0] ||
+                        pn532_packetbuffer[9] != acknowledge[1])) {
+#ifdef MIFAREDEBUG
+      PN532DEBUGPRINT.println(
+          F("ntag2xx_Authenticate: Received PACK does not match expected one"));
+#endif
+      return 0;
     }
     return 1;
   } else { // Byte 8 is 01
